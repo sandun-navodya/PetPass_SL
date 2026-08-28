@@ -19,6 +19,7 @@ model Location {
 
   parent   Location?  @relation("LocationHierarchy", fields: [parentLocationId], references: [locationId], onDelete: Cascade)
   children Location[] @relation("LocationHierarchy")
+  clinics  Clinic[]
 
   @@index([locationType, isActive])
   @@index([parentLocationId])
@@ -26,14 +27,69 @@ model Location {
 }
 
 model Category {
-  categoryId   Int       @id @default(autoincrement()) @map("category_id")
-  categoryName String    @map("category_name")
-  description  String?
-  icon         String?
-  isActive     Boolean   @default(true) @map("is_active")
-  createdAt    DateTime  @default(now()) @map("created_at")
-  updatedAt    DateTime? @updatedAt @map("updated_at")
+  categoryId     Int             @id @default(autoincrement()) @map("category_id")
+  categoryName   String          @map("category_name")
+  description    String?
+  icon           String?
+  isActive       Boolean         @default(true) @map("is_active")
+  createdAt      DateTime        @default(now()) @map("created_at")
+  updatedAt      DateTime?       @updatedAt @map("updated_at")
+  clinicServices ClinicService[]
 
   @@index([isActive])
   @@map("categories")
+}
+
+model Clinic {
+  clinicId      Int             @id @default(autoincrement()) @map("clinic_id")
+  clinicName    String          @map("clinic_name")
+  description   String?
+  locationId    Int             @map("location_id")
+  address       String
+  phone         String
+  whatsapp      String?
+  email         String?
+  website       String?
+  openingHours  Json?           @map("opening_hours")
+  mapLatitude   Float?          @map("map_latitude")
+  mapLongitude  Float?          @map("map_longitude")
+  logoUrl       String?         @map("logo_url")
+  coverImageUrl String?         @map("cover_image_url")
+  isActive      Boolean         @default(true) @map("is_active")
+  isFeatured    Boolean         @default(false) @map("is_featured")
+  createdAt     DateTime        @default(now()) @map("created_at")
+  updatedAt     DateTime?       @updatedAt @map("updated_at")
+
+  location Location        @relation(fields: [locationId], references: [locationId], onDelete: Restrict)
+  services ClinicService[]
+  images   ClinicImage[]
+
+  @@index([locationId, isActive])
+  @@index([isFeatured, isActive])
+  @@map("clinics")
+}
+
+model ClinicService {
+  clinicId   Int      @map("clinic_id")
+  categoryId Int      @map("category_id")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  clinic   Clinic   @relation(fields: [clinicId], references: [clinicId], onDelete: Cascade)
+  category Category @relation(fields: [categoryId], references: [categoryId], onDelete: Cascade)
+
+  @@id([clinicId, categoryId])
+  @@map("clinic_services")
+}
+
+model ClinicImage {
+  imageId    Int      @id @default(autoincrement()) @map("image_id")
+  clinicId   Int      @map("clinic_id")
+  type       String   @map("image_type") // 'logo' | 'cover' | 'gallery'
+  url        String   @map("image_url")
+  uploadedAt DateTime @default(now()) @map("uploaded_at")
+
+  clinic Clinic @relation(fields: [clinicId], references: [clinicId], onDelete: Cascade)
+
+  @@index([clinicId, type])
+  @@map("clinic_images")
 }
