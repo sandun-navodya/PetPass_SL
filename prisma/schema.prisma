@@ -1,0 +1,39 @@
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model Location {
+  locationId       Int        @id @default(autoincrement()) @map("location_id")
+  locationName     String     @map("location_name")
+  locationType     String     @map("location_type")
+  parentLocationId Int?       @map("parent_location_id")
+  isActive         Boolean    @default(true) @map("is_active")
+  createdAt        DateTime   @default(now()) @map("created_at")
+  updatedAt        DateTime?  @updatedAt @map("updated_at")
+
+  parent   Location?  @relation("LocationHierarchy", fields: [parentLocationId], references: [locationId], onDelete: Cascade)
+  children Location[] @relation("LocationHierarchy")
+
+  @@index([locationType, isActive])
+  @@index([parentLocationId])
+  @@map("locations")
+}
+
+model Category {
+  categoryId   Int       @id @default(autoincrement()) @map("category_id")
+  categoryName String    @map("category_name")
+  description  String?
+  icon         String?
+  isActive     Boolean   @default(true) @map("is_active")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime? @updatedAt @map("updated_at")
+
+  @@index([isActive])
+  @@map("categories")
+}
