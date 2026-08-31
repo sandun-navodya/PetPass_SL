@@ -1,44 +1,52 @@
 @import "tailwindcss";
 
-@layer base {
-  input:not([type='checkbox']):not([type='radio']),
-  textarea,
-  select {
-    color: #1e293b !important; /* Tailwind slate-800 */
-  }
-
-  input::placeholder,
-  textarea::placeholder {
-    color: #94a3b8 !important; /* Tailwind slate-400 */
-  }
-
-  select option {
-    color: #0f172a !important; /* Tailwind slate-900 */
-    background-color: #ffffff !important;
-  }
-}
-
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  color-scheme: light;
+  --palette-primary: #8B7CF6;
+  --palette-primary-dark: #6356C7;
+  --palette-mint: #A8DCC8;
+  --palette-peach: #FFB38A;
+  --palette-cream: #FAF9F6;
+  --palette-surface: #FFFFFF;
+  --palette-charcoal: #25252B;
+  --palette-muted: #73737D;
+  --palette-border: #E8E7EC;
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+@theme {
+  --color-palette-primary: var(--palette-primary);
+  --color-palette-primaryDark: var(--palette-primary-dark);
+  --color-palette-mint: var(--palette-mint);
+  --color-palette-peach: var(--palette-peach);
+  --color-palette-cream: var(--palette-cream);
+  --color-palette-surface: var(--palette-surface);
+  --color-palette-charcoal: var(--palette-charcoal);
+  --color-palette-muted: var(--palette-muted);
+  --color-palette-border: var(--palette-border);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
-}
-
+html,
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background-color: var(--palette-cream);
+  color: var(--palette-charcoal);
+  margin: 0;
+  padding: 0;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+
+/* Enforce accessible dark text inside all form controls */
+input:not([type="checkbox"]):not([type="radio"]),
+textarea,
+select {
+  color: #1e293b !important;
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: #94a3b8 !important;
+}
+
+select option {
+  color: #0f172a !important;
+  background-color: #ffffff !important;
 }

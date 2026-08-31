@@ -1,5 +1,6 @@
 import { NextRequest } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import { supabaseAdmin } from '@/lib/supabase/server';
 import { jsonEnvelope, jsonEnvelopeError, handleOptions } from '@/lib/utils/response';
 import { Prisma } from '@prisma/client';
 
@@ -53,7 +54,7 @@ export async function OPTIONS() {
  *                   example: Categories retrieved successfully
  *                 timestamp:
  *                   type: string
- *                   example: "2026-08-28T10:30:45Z"
+ *                   example: "2026-08-31T10:30:45Z"
  *                 data:
  *                   type: object
  *                   properties:
@@ -74,6 +75,9 @@ export async function OPTIONS() {
  *                           icon:
  *                             type: string
  *                             example: https://cdn.petpass.lk/icons/grooming.svg
+ *                           logoUrl:
+ *                             type: string
+ *                             example: https://xyz.supabase.co/storage/v1/object/public/categories/service-logos/123-groom.png
  *                           isActive:
  *                             type: boolean
  *                             example: true
@@ -117,9 +121,32 @@ export async function OPTIONS() {
  *     tags:
  *       - Categories
  *     summary: Create category
+ *     description: Create a new service category with support for multipart file upload (uploaded to Supabase Storage) or standard JSON.
  *     requestBody:
  *       required: true
  *       content:
+ *         multipart/form-data:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - categoryName
+ *             properties:
+ *               categoryName:
+ *                 type: string
+ *                 example: Pet Grooming
+ *               description:
+ *                 type: string
+ *                 example: Bathing, styling and hygiene services
+ *               icon:
+ *                 type: string
+ *                 example: https://cdn.petpass.lk/icons/grooming.svg
+ *               isActive:
+ *                 type: boolean
+ *                 default: true
+ *               logo:
+ *                 type: string
+ *                 format: binary
+ *                 description: Category logo image file (PNG, JPG, WebP, SVG, max 2MB)
  *         application/json:
  *           schema:
  *             type: object
@@ -135,6 +162,9 @@ export async function OPTIONS() {
  *               icon:
  *                 type: string
  *                 example: https://cdn.petpass.lk/icons/grooming.svg
+ *               logoUrl:
+ *                 type: string
+ *                 example: https://xyz.supabase.co/storage/v1/object/public/categories/service-logos/groom.png
  *               isActive:
  *                 type: boolean
  *                 default: true
@@ -157,7 +187,7 @@ export async function OPTIONS() {
  *                   example: Category created successfully
  *                 timestamp:
  *                   type: string
- *                   example: "2026-08-28T10:35:22Z"
+ *                   example: "2026-08-31T10:35:22Z"
  *                 data:
  *                   type: object
  *                   properties:
@@ -173,12 +203,15 @@ export async function OPTIONS() {
  *                     icon:
  *                       type: string
  *                       example: https://cdn.petpass.lk/icons/grooming.svg
+ *                     logoUrl:
+ *                       type: string
+ *                       example: https://xyz.supabase.co/storage/v1/object/public/categories/service-logos/123-groom.png
  *                     isActive:
  *                       type: boolean
  *                       example: true
  *                     createdAt:
  *                       type: string
- *                       example: "2026-08-28T10:35:22Z"
+ *                       example: "2026-08-31T10:35:22Z"
  */
 export async function GET(req: NextRequest) {
   try {
@@ -217,6 +250,7 @@ export async function GET(req: NextRequest) {
       categoryName: item.categoryName,
       description: item.description,
       icon: item.icon,
+      logoUrl: (item as any).logoUrl || null,
       isActive: item.isActive,
       createdAt: item.createdAt.toISOString(),
       ...(item.updatedAt ? { updatedAt: item.updatedAt.toISOString() } : {}),
@@ -248,21 +282,84 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json().catch(() => null);
+    const contentType = req.headers.get('content-type') || '';
+    let categoryName = '';
+    let description: string | null = null;
+    let icon: string | null = null;
+    let logoUrl: string | null = null;
+    let isActive = true;
 
-    if (!body || !body.categoryName || !String(body.categoryName).trim()) {
+    // 1. Check if multipart/form-data (File upload)
+    if (contentType.includes('multipart/form-data')) {
+      const formData = await req.formData();
+      categoryName = formData.get('categoryName')?.toString().trim() || '';
+      description = formData.get('description')?.toString().trim() || null;
+      icon = formData.get('icon')?.toString().trim() || null;
+      
+      const isActiveVal = formData.get('isActive');
+      if (isActiveVal !== null && isActiveVal !== undefined) {
+        isActive = isActiveVal === 'true' || isActiveVal === '1';
+      }
+
+      const file = formData.get('logo') as File | null;
+
+      if (file && file instanceof File && file.size > 0) {
+        const allowedMimes = ['image/jpeg', 'image/png', 'image/webp', 'image/svg+xml'];
+        if (!allowedMimes.includes(file.type)) {
+          return jsonEnvelopeError('Invalid file type. Only JPG, PNG, WebP, and SVG are supported', 400);
+        }
+
+        if (file.size > 2 * 1024 * 1024) {
+          return jsonEnvelopeError('Logo image size exceeds the 2MB limit', 400);
+        }
+
+        const fileExt = file.name.split('.').pop() || 'png';
+        const cleanFileName = `${Date.now()}-${Math.random().toString(36).substring(2, 8)}.${fileExt}`;
+        const storagePath = `service-logos/${cleanFileName}`;
+
+        const buffer = Buffer.from(await file.arrayBuffer());
+        const { error: uploadError } = await supabaseAdmin.storage
+          .from('categories')
+          .upload(storagePath, buffer, {
+            contentType: file.type,
+            upsert: false,
+          });
+
+        if (uploadError) {
+          console.error('[SUPABASE_UPLOAD_ERROR]:', uploadError);
+          return jsonEnvelopeError(`Failed to upload logo image: ${uploadError.message}`, 500);
+        }
+
+        const { data: urlData } = supabaseAdmin.storage
+          .from('categories')
+          .getPublicUrl(storagePath);
+
+        logoUrl = urlData.publicUrl;
+      }
+    } else {
+      // 2. Standard JSON payload fallback
+      const body = await req.json().catch(() => null);
+      if (!body) return jsonEnvelopeError('Invalid JSON request body', 400);
+
+      categoryName = String(body.categoryName || '').trim();
+      description = body.description ? String(body.description).trim() : null;
+      icon = body.icon ? String(body.icon).trim() : null;
+      logoUrl = body.logoUrl ? String(body.logoUrl).trim() : null;
+      isActive = typeof body.isActive === 'boolean' ? body.isActive : true;
+    }
+
+    if (!categoryName) {
       return jsonEnvelopeError('categoryName is required', 400);
     }
 
-    const { categoryName, description, icon, isActive } = body;
-
     const newCategory = await prisma.category.create({
       data: {
-        categoryName: String(categoryName).trim(),
-        description: description ? String(description).trim() : null,
-        icon: icon ? String(icon).trim() : null,
-        isActive: typeof isActive === 'boolean' ? isActive : true,
-      },
+        categoryName,
+        description,
+        icon,
+        logoUrl,
+        isActive,
+      } as any,
     });
 
     return jsonEnvelope(
@@ -271,6 +368,7 @@ export async function POST(req: NextRequest) {
         categoryName: newCategory.categoryName,
         description: newCategory.description,
         icon: newCategory.icon,
+        logoUrl: (newCategory as any).logoUrl || null,
         isActive: newCategory.isActive,
         createdAt: newCategory.createdAt.toISOString(),
       },
@@ -280,5 +378,6 @@ export async function POST(req: NextRequest) {
   } catch (error) {
     console.error('[CATEGORY_POST_ERROR]:', error);
     return jsonEnvelopeError('Failed to create category', 500);
+    console.log('Error details:', error);
   }
 }

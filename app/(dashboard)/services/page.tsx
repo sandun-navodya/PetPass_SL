@@ -10,6 +10,7 @@ interface ServiceItem {
   categoryName: string;
   description: string | null;
   icon: string | null;
+  logoUrl: string | null;
   isActive: boolean;
   createdAt: string;
 }
@@ -24,36 +25,43 @@ export default function ServicesPage() {
   // Modals state
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<ServiceItem | null>(null);
-  const [deleteId, setDeleteId] = useState<number | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<ServiceItem | null>(null);
+  const [deleteError, setDeleteError] = useState('');
 
   // Form inputs
   const [formData, setFormData] = useState({ categoryName: '', description: '', icon: '' });
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [removeLogo, setRemoveLogo] = useState(false);
+
   const [formLoading, setFormLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
 
   const loadData = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await apiFetch(
-        `/api/v1/categories?page=${page}&limit=10&search=${encodeURIComponent(search)}`
-      );
-      setItems(res.items);
-      setTotalPages(res.pagination.totalPages);
+      const searchParam = search.trim() ? `&search=${encodeURIComponent(search.trim())}` : '';
+      const res = await apiFetch(`/api/v1/categories?page=${page}&limit=10${searchParam}`);
+      setItems(res.items || []);
+      setTotalPages(res.pagination?.totalPages || 1);
     } catch (err: any) {
-      console.error(err);
+      console.error('[LOAD_SERVICES_ERROR]:', err);
     } finally {
       setLoading(false);
     }
   }, [page, search]);
 
   useEffect(() => {
-    const timer = setTimeout(() => loadData(), 300);
+    const timer = setTimeout(() => loadData(), 250);
     return () => clearTimeout(timer);
   }, [loadData]);
 
   const handleOpenCreate = () => {
     setEditingItem(null);
     setFormData({ categoryName: '', description: '', icon: '' });
+    setSelectedFile(null);
+    setPreviewUrl(null);
+    setRemoveLogo(false);
     setErrorMsg('');
     setIsFormOpen(true);
   };
@@ -65,8 +73,26 @@ export default function ServicesPage() {
       description: item.description || '',
       icon: item.icon || '',
     });
+    setSelectedFile(null);
+    setPreviewUrl(item.logoUrl || null);
+    setRemoveLogo(false);
     setErrorMsg('');
     setIsFormOpen(true);
+  };
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      setSelectedFile(file);
+      setPreviewUrl(URL.createObjectURL(file));
+      setRemoveLogo(false);
+    }
+  };
+
+  const handleRemoveSelectedLogo = () => {
+    setSelectedFile(null);
+    setPreviewUrl(null);
+    setRemoveLogo(true);
   };
 
   const handleSave = async (e: React.FormEvent) => {
@@ -74,18 +100,36 @@ export default function ServicesPage() {
     setFormLoading(true);
     setErrorMsg('');
 
+    if (!formData.categoryName.trim()) {
+      setErrorMsg('Category name is required');
+      setFormLoading(false);
+      return;
+    }
+
     try {
-      if (editingItem) {
-        await apiFetch(`/api/v1/categories/${editingItem.categoryID}`, {
-          method: 'PUT',
-          body: JSON.stringify(formData),
-        });
-      } else {
-        await apiFetch('/api/v1/categories', {
-          method: 'POST',
-          body: JSON.stringify(formData),
-        });
+      const fd = new FormData();
+      fd.append('categoryName', formData.categoryName.trim());
+      if (formData.description) fd.append('description', formData.description.trim());
+      if (formData.icon) fd.append('icon', formData.icon.trim());
+      if (selectedFile) fd.append('logo', selectedFile);
+      if (removeLogo) fd.append('removeLogo', 'true');
+
+      const token = typeof window !== 'undefined' ? localStorage.getItem('access_token') : null;
+      const endpoint = editingItem
+        ? `/api/v1/categories/${editingItem.categoryID}`
+        : '/api/v1/categories';
+
+      const res = await fetch(endpoint, {
+        method: editingItem ? 'PUT' : 'POST',
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        body: fd,
+      });
+
+      const json = await res.json();
+      if (!res.ok || json.status === 'error') {
+        throw new Error(json.message || 'Operation failed');
       }
+
       setIsFormOpen(false);
       loadData();
     } catch (err: any) {
@@ -102,20 +146,22 @@ export default function ServicesPage() {
         body: JSON.stringify({ isActive: !item.isActive }),
       });
       loadData();
-    } catch (err) {
-      console.error(err);
+    } catch (err: any) {
+      console.error('[TOGGLE_STATUS_ERROR]:', err);
     }
   };
 
-  const handleDelete = async () => {
-    if (!deleteId) return;
+  const handlePermanentDelete = async () => {
+    if (!deleteTarget) return;
     setFormLoading(true);
+    setDeleteError('');
+
     try {
-      await apiFetch(`/api/v1/categories/${deleteId}`, { method: 'DELETE' });
-      setDeleteId(null);
+      await apiFetch(`/api/v1/categories/${deleteTarget.categoryID}`, { method: 'DELETE' });
+      setDeleteTarget(null);
       loadData();
-    } catch (err) {
-      console.error(err);
+    } catch (err: any) {
+      setDeleteError(err.message || 'Failed to permanently delete category.');
     } finally {
       setFormLoading(false);
     }
@@ -125,8 +171,8 @@ export default function ServicesPage() {
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h2 className="text-2xl font-bold text-gray-900 tracking-tight">Service Categories</h2>
-          <p className="text-xs text-gray-400 mt-0.5">Manage directory pet care services and offerings</p>
+          <h2 className="text-2xl font-bold text-slate-900 tracking-tight">Service Categories</h2>
+          <p className="text-xs text-slate-500 mt-0.5">Manage directory pet care services and offerings</p>
         </div>
         <button
           onClick={handleOpenCreate}
@@ -137,7 +183,7 @@ export default function ServicesPage() {
       </div>
 
       {/* Filter and Search Bar */}
-      <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-100 flex items-center justify-between">
+      <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-200/70 flex items-center justify-between">
         <div className="relative w-72">
           <input
             type="text"
@@ -149,15 +195,15 @@ export default function ServicesPage() {
             placeholder="Search categories..."
             className="w-full pl-9 pr-4 py-2 rounded-xl bg-white border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-[#0d5c52]/20 text-slate-800 placeholder:text-slate-400 focus:text-slate-900"
           />
-          <span className="absolute left-3 top-2.5 text-gray-400 text-xs">🔍</span>
+          <span className="absolute left-3 top-2.5 text-slate-400 text-xs">🔍</span>
         </div>
       </div>
 
       {/* Table Container */}
-      <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
+      <div className="bg-white rounded-2xl shadow-sm border border-slate-200/70 overflow-hidden">
         <table className="w-full text-left border-collapse">
           <thead>
-            <tr className="border-b border-gray-100 text-[11px] font-bold uppercase tracking-wider text-gray-400 bg-slate-50/50">
+            <tr className="border-b border-slate-100 text-[11px] font-bold uppercase tracking-wider text-slate-400 bg-slate-50/50">
               <th className="px-6 py-4">ID</th>
               <th className="px-6 py-4">Category</th>
               <th className="px-6 py-4">Description</th>
@@ -165,57 +211,85 @@ export default function ServicesPage() {
               <th className="px-6 py-4 text-right">Actions</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-gray-100 text-sm">
+          <tbody className="divide-y divide-slate-100 text-sm">
             {loading ? (
               <tr>
-                <td colSpan={5} className="text-center py-10 text-gray-400 text-sm">
+                <td colSpan={5} className="text-center py-10 text-slate-400 text-sm">
                   Loading service records...
                 </td>
               </tr>
             ) : items.length === 0 ? (
               <tr>
-                <td colSpan={5} className="text-center py-10 text-gray-400 text-sm">
+                <td colSpan={5} className="text-center py-10 text-slate-400 text-sm">
                   No service categories found.
                 </td>
               </tr>
             ) : (
               items.map((item) => (
                 <tr key={item.categoryID} className="hover:bg-slate-50/50 transition">
-                  <td className="px-6 py-4 font-mono text-xs text-gray-400 font-semibold">
+                  <td className="px-6 py-4 font-mono text-xs text-slate-400 font-semibold">
                     #{item.categoryID}
                   </td>
-                  <td className="px-6 py-4 font-bold text-gray-800">
+                  <td className="px-6 py-4 font-bold text-slate-800">
                     <div className="flex items-center gap-3">
-                      <div className="w-8 h-8 rounded-lg bg-teal-50 text-[#0d5c52] flex items-center justify-center font-bold">
-                        {item.icon ? <img src={item.icon} alt="" className="w-5 h-5 object-contain" /> : '🐾'}
+                      <div className="w-9 h-9 rounded-xl bg-teal-50 border border-teal-100/60 flex items-center justify-center overflow-hidden shrink-0">
+                        {item.logoUrl ? (
+                          <img
+                            src={item.logoUrl}
+                            alt={item.categoryName}
+                            className="w-full h-full object-contain p-1"
+                          />
+                        ) : (
+                          <span className="text-sm">🐾</span>
+                        )}
                       </div>
                       <span>{item.categoryName}</span>
                     </div>
                   </td>
-                  <td className="px-6 py-4 text-gray-500 max-w-xs truncate text-xs">
+                  <td className="px-6 py-4 text-slate-500 max-w-xs truncate text-xs">
                     {item.description || '—'}
                   </td>
                   <td className="px-6 py-4">
-                    <button
-                      onClick={() => handleToggleStatus(item)}
-                      className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold transition ${
-                        item.isActive
-                          ? 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
-                          : 'bg-rose-50 text-rose-700 hover:bg-rose-100'
+                    <span
+                      className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold ${
+                        item.isActive ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'
                       }`}
                     >
-                      {item.isActive ? '● Active' : '○ Inactive'}
-                    </button>
+                      <span
+                        className={`w-1.5 h-1.5 rounded-full ${
+                          item.isActive ? 'bg-emerald-500' : 'bg-rose-500'
+                        }`}
+                      />
+                      {item.isActive ? 'Active' : 'Inactive'}
+                    </span>
                   </td>
                   <td className="px-6 py-4 text-right space-x-2">
+                    {/* Status Action Button */}
+                    <button
+                      onClick={() => handleToggleStatus(item)}
+                      className={`px-3 py-1.5 rounded-lg font-semibold text-xs transition ${
+                        item.isActive
+                          ? 'bg-amber-50 hover:bg-amber-100 text-amber-700'
+                          : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-700'
+                      }`}
+                    >
+                      {item.isActive ? 'Deactivate' : 'Activate'}
+                    </button>
+
+                    {/* Edit Button */}
                     <button
                       onClick={() => handleOpenEdit(item)}
-                      className="px-3 py-1.5 rounded-lg bg-gray-50 hover:bg-gray-100 text-gray-700 font-semibold text-xs transition"
+                      className="px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold text-xs transition"
                     >
                       Edit
                     </button>
+
+                    {/* Permanent Delete Button */}
                     <button
-                      onClick={() => setDeleteId(item.categoryID)}
+                      onClick={() => {
+                        setDeleteError('');
+                        setDeleteTarget(item);
+                      }}
                       className="px-3 py-1.5 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-600 font-semibold text-xs transition"
                     >
                       Delete
@@ -228,7 +302,7 @@ export default function ServicesPage() {
         </table>
 
         {/* Pagination Controls */}
-        <div className="p-4 border-t border-gray-100 flex items-center justify-between text-xs text-gray-500">
+        <div className="p-4 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500">
           <span>
             Page {page} of {totalPages}
           </span>
@@ -236,14 +310,14 @@ export default function ServicesPage() {
             <button
               disabled={page <= 1}
               onClick={() => setPage((p) => Math.max(1, p - 1))}
-              className="px-3 py-1.5 rounded-lg border border-gray-200 hover:bg-gray-50 disabled:opacity-40"
+              className="px-3 py-1.5 rounded-lg border border-slate-200 hover:bg-slate-50 disabled:opacity-40"
             >
               Previous
             </button>
             <button
               disabled={page >= totalPages}
               onClick={() => setPage((p) => p + 1)}
-              className="px-3 py-1.5 rounded-lg border border-gray-200 hover:bg-gray-50 disabled:opacity-40"
+              className="px-3 py-1.5 rounded-lg border border-slate-200 hover:bg-slate-50 disabled:opacity-40"
             >
               Next
             </button>
@@ -259,48 +333,81 @@ export default function ServicesPage() {
       >
         <form onSubmit={handleSave} className="space-y-4">
           {errorMsg && (
-            <div className="p-3 bg-rose-50 border border-rose-200 text-rose-700 rounded-xl text-xs">
+            <div className="p-3 bg-rose-50 border border-rose-200 text-rose-700 rounded-xl text-xs font-semibold">
               {errorMsg}
             </div>
           )}
 
           <div>
-            <label className="block text-xs font-bold uppercase text-gray-600 mb-1">Service Name *</label>
+            <label className="block text-xs font-bold uppercase text-slate-700 mb-1">
+              Service Name *
+            </label>
             <input
               type="text"
               required
               value={formData.categoryName}
               onChange={(e) => setFormData({ ...formData, categoryName: e.target.value })}
+              placeholder="e.g. Grooming"
               className="w-full px-4 py-2 rounded-xl bg-white border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-[#0d5c52]/20 text-slate-800 placeholder:text-slate-400 focus:text-slate-900"
             />
           </div>
 
           <div>
-            <label className="block text-xs font-bold uppercase text-gray-600 mb-1">Description</label>
+            <label className="block text-xs font-bold uppercase text-slate-700 mb-1">
+              Description
+            </label>
             <textarea
               rows={3}
               value={formData.description}
               onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+              placeholder="e.g. Bathing, styling and hygiene services"
               className="w-full px-4 py-2 rounded-xl bg-white border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-[#0d5c52]/20 text-slate-800 placeholder:text-slate-400 focus:text-slate-900"
             />
           </div>
 
+          {/* Logo Upload Container */}
           <div>
-            <label className="block text-xs font-bold uppercase text-gray-600 mb-1">Icon URL</label>
-            <input
-              type="url"
-              value={formData.icon}
-              onChange={(e) => setFormData({ ...formData, icon: e.target.value })}
-              placeholder="https://cdn.petpass.lk/icons/example.svg"
-              className="w-full px-4 py-2 rounded-xl bg-white border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-[#0d5c52]/20 text-slate-800 placeholder:text-slate-400 focus:text-slate-900"
-            />
+            <label className="block text-xs font-bold uppercase text-slate-700 mb-1">
+              Service Logo
+            </label>
+            <div className="flex items-center gap-4">
+              <label className="border-2 border-dashed border-slate-200 rounded-2xl w-24 h-24 flex flex-col items-center justify-center cursor-pointer hover:bg-slate-50 transition relative overflow-hidden shrink-0 bg-white">
+                {previewUrl ? (
+                  <img src={previewUrl} alt="Preview" className="w-14 h-14 object-contain" />
+                ) : (
+                  <>
+                    <span className="text-xl text-slate-400">📁</span>
+                    <span className="text-[10px] font-bold text-slate-500 mt-1">Upload</span>
+                  </>
+                )}
+                <input
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp,image/svg+xml"
+                  className="hidden"
+                  onChange={handleFileChange}
+                />
+              </label>
+              <div className="text-xs text-slate-500">
+                <p className="font-semibold text-slate-700">Recommended: Square SVG or PNG</p>
+                <p>Stored directly in Supabase Storage.</p>
+                {previewUrl && (
+                  <button
+                    type="button"
+                    onClick={handleRemoveSelectedLogo}
+                    className="text-xs text-rose-500 hover:underline mt-1 font-semibold block"
+                  >
+                    Remove Logo
+                  </button>
+                )}
+              </div>
+            </div>
           </div>
 
           <div className="flex justify-end gap-3 pt-3">
             <button
               type="button"
               onClick={() => setIsFormOpen(false)}
-              className="px-4 py-2 rounded-xl bg-gray-100 text-gray-600 text-sm font-medium hover:bg-gray-200"
+              className="px-4 py-2 rounded-xl bg-slate-100 text-slate-600 text-sm font-semibold hover:bg-slate-200"
             >
               Cancel
             </button>
@@ -315,13 +422,17 @@ export default function ServicesPage() {
         </form>
       </Modal>
 
-      {/* Confirm Soft Delete */}
+      {/* Permanent Hard Delete Confirmation Modal */}
       <ConfirmModal
-        isOpen={deleteId !== null}
-        onClose={() => setDeleteId(null)}
-        onConfirm={handleDelete}
-        title="Delete Service Category"
-        message="Are you sure you want to deactivate this service category? It will no longer appear in public selections."
+        isOpen={deleteTarget !== null}
+        onClose={() => setDeleteTarget(null)}
+        onConfirm={handlePermanentDelete}
+        title="Permanently Delete Service Category"
+        message={
+          deleteError
+            ? deleteError
+            : `Are you sure you want to permanently delete "${deleteTarget?.categoryName}"? This will permanently wipe the record and its storage files. This action cannot be undone.`
+        }
         isLoading={formLoading}
       />
     </div>
